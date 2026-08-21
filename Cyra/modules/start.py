@@ -41,43 +41,15 @@ HELP_TEXT = (
     f"/id — {sc('ʏᴏᴜʀ ɪᴅ')}\n"
     f"/pinterest <q> — {sc('10 ᴘɪɴᴛᴇʀᴇꜱᴛ ᴘʜᴏᴛᴏꜱ')}\n"
     f"/pin <q> — {sc('ꜱᴀᴍᴇ ᴀꜱ ᴘɪɴᴛᴇʀᴇꜱᴛ')}\n"
-    f"/tmdb <q> — {sc('ꜱᴇᴀʀᴄʜ ᴍᴏᴠɪᴇ / ꜱᴇʀɪᴇꜱ')}\n\n"
+    f"/tmdb <q> — {sc('ꜱᴇᴀʀᴄʜ ᴍᴏᴠɪᴇ / ꜱᴇʀɪᴇꜱ')}\n"
+    f"/poster — {sc('ᴘᴏꜱᴛᴇʀꜰᴏʀɢᴇ ꜱᴛᴜᴅɪᴏ ʜᴇʟᴘ')}\n"
+    f"/setchannel <name> — {sc('ᴘᴏꜱᴛᴇʀ ᴄʜᴀɴɴᴇʟ ɴᴀᴍᴇ')}\n\n"
     f"<b>{sc('ɢʀᴏᴜᴘ')}</b>\n"
     f"/id — {sc('ᴄʜᴀᴛ & ᴜꜱᴇʀ ɪᴅ')}\n\n"
     f"<b>{sc('ᴏᴡɴᴇʀ')}</b>\n"
     f"/broadcast — {sc('ʙʀᴏᴀᴅᴄᴀꜱᴛ ᴍᴇꜱꜱᴀɢᴇ')}\n\n"
     f"<i>{sc('ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴅʀᴀɢᴏɴʙʏᴛᴇ ɴᴇᴛᴡᴏʀᴋ')}</i>"
 )
-
-
-@app.on_message(filters.command("start") & ~filters.bot)
-async def start_cmd(_, m: Message):
-    if m.chat.type == ChatType.PRIVATE:
-        await add_user(m.from_user.id, m.from_user.username)
-        if LOGGER_GROUP_ID:
-            try:
-                await app.send_message(
-                    LOGGER_GROUP_ID,
-                    f"<b>ɴᴇᴡ ᴜꜱᴇʀ</b>\n"
-                    f"• {m.from_user.mention}\n"
-                    f"• <code>{m.from_user.id}</code>",
-                )
-            except Exception:
-                pass
-        await m.reply_photo(
-            photo=random.choice(IMG),
-            caption=START_TEXT,
-            reply_markup=start_btns(),
-        )
-    else:
-        await add_chat(m.chat.id)
-        await m.reply_text(
-            f"<b>{sc('ʜᴇʏ')} ꓚʏ፝֟፝֟ʀᴀ {sc('ɪꜱ ʜᴇʀᴇ')}</b>\n"
-            f"{sc('ᴜꜱᴇ')} /help {sc('ꜰᴏʀ ᴄᴏᴍᴍᴀɴᴅꜱ')}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(sc("ᴀᴅᴅ ᴍᴇ"), url=f"https://t.me/{app.username}?startgroup=true")]
-            ]),
-        )
 
 
 @app.on_message(filters.command("help") & ~filters.bot)

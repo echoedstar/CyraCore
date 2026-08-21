@@ -22,7 +22,11 @@ except ImportError:
 @app.on_message(filters.command(["pinterest", "pin", "pins"]))
 async def pinterest_cmd(_, m: Message):
     if Pinterest is None:
-        return await m.reply_text(sc("ᴘɪɴꜱᴄʀᴀᴘᴇ ɴᴏᴛ ɪɴꜱᴛᴀʟʟᴇᴅ"))
+        return await m.reply_text(
+            "<b>ᴘɪɴꜱᴄʀᴀᴘᴇ ɴᴏᴛ ɪɴꜱᴛᴀʟʟᴇᴅ</b>\n\n"
+            "<code>pip install pinscrape</code>\n"
+            "ᴘʜɪʀ ʙᴏᴛ ʀᴇꜱᴛᴀʀᴛ ᴋᴀʀᴏ"
+        )
 
     if len(m.command) < 2:
         return await m.reply_text(
