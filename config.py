@@ -11,7 +11,7 @@ API_HASH = getenv("API_HASH", "")
 BOT_TOKEN = getenv("BOT_TOKEN", "")
 OWNER_ID = int(getenv("OWNER_ID", 8681820826))
 MONGO_URL = getenv("MONGO_URL", "")
-TMDB_API_KEY = getenv("TMDB_API_KEY", "")
+TMDB_API_KEY = getenv("TMDB_API_KEY", "64497c389b3440d0a40f0c7e5664248f")
 
 AUTH_CHANNEL = int(getenv("AUTH_CHANNEL", 0) or 0)
 FSUB = getenv("FSUB", "False").lower() in ("true", "1", "yes")

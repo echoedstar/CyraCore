@@ -7,3 +7,5 @@ dnspython
 aiohttp
 requests
 pinscrape
+pillow
+aiofiles
