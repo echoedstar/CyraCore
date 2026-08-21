@@ -33,24 +33,26 @@ START_TEXT = (
 
 HELP_TEXT = (
     f"<b>{sc('ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ')}</b>\n\n"
-    f"<b>{sc('ᴜꜱᴇʀꜱ')}</b>\n"
-    f"/start — {sc('ꜱᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ')}\n"
-    f"/help — {sc('ʜᴇʟᴘ ᴍᴇɴᴜ')}\n"
-    f"/ping — {sc('ᴄʜᴇᴄᴋ ʟᴀᴛᴇɴᴄʏ')}\n"
-    f"/stats — {sc('ʙᴏᴛ ꜱᴛᴀᴛꜱ')}\n"
-    f"/id — {sc('ʏᴏᴜʀ ɪᴅ')}\n"
-    f"/pinterest <q> — {sc('10 ᴘɪɴᴛᴇʀᴇꜱᴛ ᴘʜᴏᴛᴏꜱ')}\n"
-    f"/pin <q> — {sc('ꜱᴀᴍᴇ ᴀꜱ ᴘɪɴᴛᴇʀᴇꜱᴛ')}\n"
-    f"/tmdb <q> — {sc('ꜱᴇᴀʀᴄʜ ᴍᴏᴠɪᴇ / ꜱᴇʀɪᴇꜱ')}\n"
-    f"/poster — {sc('ᴘᴏꜱᴛᴇʀꜰᴏʀɢᴇ ꜱᴛᴜᴅɪᴏ ʜᴇʟᴘ')}\n"
-    f"/setchannel <name> — {sc('ᴘᴏꜱᴛᴇʀ ᴄʜᴀɴɴᴇʟ ɴᴀᴍᴇ')}\n\n"
-    f"<b>{sc('ɢʀᴏᴜᴘ')}</b>\n"
-    f"/id — {sc('ᴄʜᴀᴛ & ᴜꜱᴇʀ ɪᴅ')}\n\n"
+    f"<b>{sc('ᴄᴏʀᴇ')}</b>\n"
+    f"/start /help /ping /stats /id\n\n"
+    f"<b>{sc('ᴍᴇᴅɪᴀ')}</b>\n"
+    f"/pinterest /pin — {sc('ᴘɪɴᴛᴇʀᴇꜱᴛ ᴘʜᴏᴛᴏꜱ')}\n"
+    f"/tmdb — {sc('ᴍᴏᴠɪᴇ ꜱᴇᴀʀᴄʜ + ᴘᴏꜱᴛᴇʀ')}\n"
+    f"/poster — {sc('ᴘᴏꜱᴛᴇʀꜰᴏʀɢᴇ ʜᴇʟᴘ')}\n\n"
+    f"<b>{sc('ɢʀᴏᴜᴘ ꜰᴜɴ')}</b>\n"
+    f"/truth /dare /tod\n"
+    f"/joke /quote /roast\n"
+    f"/ship /couple /gayrate /love\n"
+    f"/dice /coin /choose /decide\n"
+    f"/hug /pat /bonk /meme\n"
+    f"/reverse /shout /emojify /password\n\n"
+    f"<b>{sc('ɢʀᴏᴜᴘ ᴛᴏᴏʟꜱ')}</b>\n"
+    f"/info /chatinfo /admins\n"
+    f"/warn /warns /delwarn /del\n\n"
     f"<b>{sc('ᴏᴡɴᴇʀ')}</b>\n"
-    f"/broadcast — {sc('ʙʀᴏᴀᴅᴄᴀꜱᴛ ᴍᴇꜱꜱᴀɢᴇ')}\n\n"
+    f"/broadcast\n\n"
     f"<i>{sc('ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴅʀᴀɢᴏɴʙʏᴛᴇ ɴᴇᴛᴡᴏʀᴋ')}</i>"
 )
-
 
 @app.on_message(filters.command("help") & ~filters.bot)
 async def help_cmd(_, m: Message):

@@ -1,22 +1,17 @@
-from __future__ import annotations
 # © 2026 DragonByte Network | @flexyy
-# Telegram PosterFORGE — layouts + caption + inline controls
+# PosterFORGE for Telegram — landscape / hero / cinema + caption templates
+
+from __future__ import annotations
 
 import io
 import os
-import tempfile
+from datetime import datetime
 from typing import Any
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from pyrogram import filters
-from pyrogram.types import (
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    InputMediaPhoto,
-    Message,
-)
+from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 from config import TMDB_API_KEY
 from Cyra import app
@@ -24,50 +19,69 @@ from Cyra.helpers import sc
 from Cyra.modules.tmdb import tmdb_get
 
 IMG_BASE = "https://image.tmdb.org/t/p"
-
-# user_id -> studio state
 SESSIONS: dict[int, dict[str, Any]] = {}
 
+DIMS = {
+    "landscape": (1600, 900),
+    "hero": (1280, 720),
+    "cinema": (1280, 720),
+}
+
+PIXEL_PRESETS = [
+    "480p | 720p | 1080p",
+    "720p | 1080p | 2160p",
+    "1080p",
+    "480p | 720p",
+]
+
 DEFAULTS = {
-    "layout": "classic",       # classic | hero | minimal
-    "quality": "1080p",        # 720p | 1080p | 4K
-    "audio": "Hindi",          # Hindi | English | Dual
-    "status": "Completed",     # Completed | Continuing | Upcoming
-    "pixels": "1080p",
+    "layout": "landscape",
+    "caption_tpl": "classic",
+    "audio": "Hindi",
+    "status": "Completed",
+    "pixels": "480p | 720p | 1080p",
     "channel": "DragonByte",
+    "cta": "Watch Now",
     "show_overview": True,
 }
 
 
 def _font(size: int, bold: bool = False):
-    candidates = [
+    paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf" if bold else "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     ]
-    for path in candidates:
-        if os.path.exists(path):
+    for p in paths:
+        if os.path.exists(p):
             try:
-                return ImageFont.truetype(path, size)
+                return ImageFont.truetype(p, size)
             except Exception:
                 pass
     return ImageFont.load_default()
 
 
-def _fit(text: str, draw: ImageDraw.ImageDraw, font, max_w: int) -> str:
-    if draw.textlength(text, font=font) <= max_w:
+def _textlen(draw, text, font):
+    try:
+        return draw.textlength(text, font=font)
+    except Exception:
+        b = draw.textbbox((0, 0), text, font=font)
+        return b[2] - b[0]
+
+
+def _fit(text, draw, font, max_w):
+    if _textlen(draw, text, font) <= max_w:
         return text
-    while text and draw.textlength(text + "…", font=font) > max_w:
+    while text and _textlen(draw, text + "...", font) > max_w:
         text = text[:-1]
-    return text + "…"
+    return text + "..."
 
 
-def _wrap(text: str, draw: ImageDraw.ImageDraw, font, max_w: int, max_lines: int = 4) -> list[str]:
+def _wrap(text, draw, font, max_w, max_lines=4):
     words = (text or "").split()
     lines, cur = [], ""
     for w in words:
         test = (cur + " " + w).strip()
-        if draw.textlength(test, font=font) <= max_w:
+        if _textlen(draw, test, font) <= max_w:
             cur = test
         else:
             if cur:
@@ -77,12 +91,67 @@ def _wrap(text: str, draw: ImageDraw.ImageDraw, font, max_w: int, max_lines: int
                 break
     if cur and len(lines) < max_lines:
         lines.append(cur)
-    if len(lines) == max_lines and words:
+    if lines and len(lines) == max_lines:
         lines[-1] = _fit(lines[-1], draw, font, max_w)
     return lines
 
 
-async def fetch_bytes(url: str) -> bytes:
+def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
+    ir = img.width / img.height
+    tr = w / h
+    if ir > tr:
+        sh = img.height
+        sw = int(img.height * tr)
+        sx = (img.width - sw) // 2
+        sy = 0
+    else:
+        sw = img.width
+        sh = int(img.width / tr)
+        sx = 0
+        sy = (img.height - sh) // 2
+    crop = img.crop((sx, sy, sx + sw, sy + sh))
+    return crop.resize((w, h), Image.Resampling.LANCZOS)
+
+
+def _gradient_bottom(w, h):
+    g = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(g)
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        if t < 0.2:
+            a = 0
+        elif t < 0.45:
+            a = int(90 * ((t - 0.2) / 0.25))
+        else:
+            a = int(90 + 145 * ((t - 0.45) / 0.55))
+        d.line([(0, y), (w, y)], fill=(0, 0, 0, min(a, 235)))
+    return g
+
+
+def _gradient_left(w, h):
+    g = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(g)
+    max_x = int(w * 0.55)
+    for x in range(max_x):
+        a = int(140 * (1 - x / max_x))
+        d.line([(x, 0), (x, h)], fill=(0, 0, 0, a))
+    return g
+
+
+def _round_rect(draw, box, r, fill):
+    draw.rounded_rectangle(box, radius=r, fill=fill)
+
+
+def media_label(d: dict) -> str:
+    g = (d.get("genres") or "").lower()
+    if "animation" in g or "anime" in g:
+        return "ANIME"
+    if d.get("type") == "tv":
+        return "SERIES"
+    return "MOVIE"
+
+
+async def fetch_bytes(url: str):
     if not url:
         return None
     try:
@@ -95,7 +164,7 @@ async def fetch_bytes(url: str) -> bytes:
     return None
 
 
-async def load_details(media_type: str, tmdb_id: int) -> dict:
+async def load_details(media_type: str, tmdb_id: int) -> dict | None:
     path = f"/{media_type}/{tmdb_id}"
     data = await tmdb_get(path, {
         "append_to_response": "images,external_ids",
@@ -107,18 +176,22 @@ async def load_details(media_type: str, tmdb_id: int) -> dict:
     title = data.get("name") if is_tv else data.get("title")
     date = data.get("first_air_date") if is_tv else data.get("release_date")
     year = (date or "")[:4]
-    genres = ", ".join(g["name"] for g in (data.get("genres") or [])[:4])
-    overview = (data.get("overview") or "")[:400]
+    genres = ", ".join(g["name"] for g in (data.get("genres") or [])[:5])
+    overview = (data.get("overview") or "")[:500]
     rating = round(float(data.get("vote_average") or 0), 1)
     poster = data.get("poster_path")
     backdrop = data.get("backdrop_path")
-    runtime = None
-    episodes = None
-    if is_tv:
-        episodes = data.get("number_of_episodes")
-        runtime = (data.get("episode_run_time") or [None])[0]
-    else:
-        runtime = data.get("runtime")
+    status = data.get("status") or ("Ended" if is_tv else "Released")
+    seasons = data.get("number_of_seasons") if is_tv else None
+    episodes = data.get("number_of_episodes") if is_tv else None
+    logo = None
+    logos = (data.get("images") or {}).get("logos") or []
+    if logos:
+        logos = sorted(
+            logos,
+            key=lambda x: (0 if x.get("iso_639_1") == "en" else 1, -(x.get("vote_average") or 0)),
+        )
+        logo = f"{IMG_BASE}/w500{logos[0]['file_path']}"
     return {
         "id": tmdb_id,
         "type": media_type,
@@ -129,241 +202,320 @@ async def load_details(media_type: str, tmdb_id: int) -> dict:
         "rating": rating,
         "poster": f"{IMG_BASE}/w780{poster}" if poster else None,
         "backdrop": f"{IMG_BASE}/w1280{backdrop}" if backdrop else None,
-        "runtime": runtime,
+        "logo": logo,
+        "status": status,
+        "seasons": seasons,
         "episodes": episodes,
         "link": f"https://www.themoviedb.org/{media_type}/{tmdb_id}",
     }
 
 
 def build_caption(d: dict, s: dict) -> str:
+    tpl = s.get("caption_tpl") or "classic"
     title = d["title"]
-    year = d["year"]
-    lines = [
-        f"🎬 {title} ({year})",
-        "╭───────────────────",
-    ]
-    if s.get("status"):
-        lines.append(f"➥ Status: {s['status']}")
-    if d.get("episodes"):
-        lines.append(f"➥ Episodes: {d['episodes']}")
-    if d.get("rating"):
-        lines.append(f"➥ Ratings: {d['rating']} TMDb")
-    lines.append(f"➥ Pixels: {s.get('quality') or s.get('pixels') or '1080p'}")
-    lines.append(f"➥ Audio: {s.get('audio') or 'Hindi'}")
+    year = d.get("year") or ""
+    title_line = f"{title} ({year})".strip()
+    powered = s.get("channel") or "DragonByte"
+    status = s.get("status") or d.get("status") or ""
+    pixels = s.get("pixels") or "1080p"
+    audio = s.get("audio") or "Hindi"
+    rating = d.get("rating")
+    episodes = d.get("episodes")
+    genres = d.get("genres") or ""
+    overview = d.get("overview") or ""
+
+    if tpl == "minimal":
+        lines = [title_line]
+        if s.get("show_overview") and overview:
+            lines.append(overview[:180])
+        lines.append(f"Powered by: {powered}")
+        return "\n".join(lines)
+
+    if tpl == "compact":
+        bits = []
+        if status:
+            bits.append(status)
+        if rating:
+            bits.append(f"★ {rating}")
+        if pixels:
+            bits.append(pixels)
+        if audio:
+            bits.append(audio)
+        lines = [title_line, " · ".join(bits)]
+        if genres:
+            lines.append(genres)
+        lines.append(f"Powered by: {powered}")
+        return "\n".join(lines)
+
+    if tpl == "hashtag":
+        tags = ["#" + "".join(c for c in title if c.isalnum())]
+        for g in genres.split(","):
+            t = "".join(c for c in g.strip() if c.isalnum())
+            if t:
+                tags.append("#" + t)
+        tags.append("#PosterFORGE")
+        lines = [title_line, " ".join(tags[:8]), f"Powered by: {powered}"]
+        return "\n".join(lines)
+
+    # classic (default) — matches website
+    lines = [title_line, "╭───────────────────"]
+    if status:
+        lines.append(f"➥ Status: {status}")
+    if episodes:
+        lines.append(f"➥ Episodes: {episodes}")
+    if rating:
+        lines.append(f"➥ Ratings: {rating} TMDb")
+    if pixels:
+        lines.append(f"➥ Pixels: {pixels}")
+    if audio:
+        lines.append(f"➥ Audio: {audio}")
     lines.append("├───────────────────")
-    if d.get("genres"):
-        lines.append(f"➥ Genres: {d['genres']}")
+    if genres:
+        lines.append(f"➥ Genres: {genres}")
     lines.append("╰───────────────────")
-    if s.get("show_overview") and d.get("overview"):
-        lines.append(f"≡ {d['overview'][:220]}")
-    ch = s.get("channel") or "DragonByte"
+    if s.get("show_overview") and overview:
+        lines.append(f"≡ {overview[:240]}")
     lines.append("╭───────────────────")
-    lines.append(f"➥ Powered by: {ch}")
+    lines.append(f"➥ Powered by: {powered}")
     lines.append("╰───────────────────")
-    # hashtags
-    tags = ["#" + g.strip().replace(" ", "") for g in (d.get("genres") or "").split(",") if g.strip()]
-    tags.append("#PosterFORGE")
-    lines.append(" ".join(tags[:6]))
     return "\n".join(lines)
 
 
-def render_poster(d: dict, s: dict, poster_bytes: bytes, back_bytes: bytes) -> bytes:
-    layout = s.get("layout") or "classic"
-    q = s.get("quality") or "1080p"
-    sizes = {"720p": (720, 1280), "1080p": (1080, 1920), "4K": (1440, 2560)}
-    # landscape-ish for classic/hero
-    if layout in ("classic", "hero"):
-        sizes = {"720p": (1280, 720), "1080p": (1920, 1080), "4K": (2560, 1440)}
-    W, H = sizes.get(q, (1920, 1080))
+def draw_brand(draw, W, channel: str):
+    pad = 36
+    y = 36
+    name = channel or "DragonByte"
+    f_mark = _font(14, True)
+    f_name = _font(17, True)
+    f_copy = _font(12)
+    mark = 28
+    name_w = _textlen(draw, name, f_name)
+    total = mark + 10 + name_w
+    x = W - pad - total
+    _round_rect(draw, [x, y - 18, x + mark, y - 18 + mark], 8, (255, 255, 255))
+    dw = _textlen(draw, "D", f_mark)
+    draw.text((x + (mark - dw) / 2, y - 14), "D", font=f_mark, fill=(10, 10, 10))
+    draw.text((x + mark + 10, y - 14), name, font=f_name, fill=(255, 255, 255))
+    copy = f"(c) {datetime.now().year}"
+    cw = _textlen(draw, copy, f_copy)
+    draw.text((W - pad - cw, y + 14), copy, font=f_copy, fill=(180, 180, 180))
 
-    base_img = None
-    raw = back_bytes or poster_bytes
-    if raw:
+
+def render_poster(d: dict, s: dict, art_bytes, logo_bytes=None) -> bytes:
+    layout = s.get("layout") or "landscape"
+    W, H = DIMS.get(layout, DIMS["landscape"])
+    channel = s.get("channel") or "DragonByte"
+    cta = s.get("cta") or "Watch Now"
+
+    if art_bytes:
         try:
-            base_img = Image.open(io.BytesIO(raw)).convert("RGB")
+            base = Image.open(io.BytesIO(art_bytes)).convert("RGB")
         except Exception:
-            base_img = None
-    if base_img is None:
-        base_img = Image.new("RGB", (W, H), (20, 20, 28))
-
-    # cover resize
-    img = base_img.copy()
-    img = ImageEnhance.Brightness(img).enhance(0.75)
-    img = img.resize((W, H), Image.Resampling.LANCZOS)
-    # blur overlay layer
-    blur = img.filter(ImageFilter.GaussianBlur(24))
-    canvas = Image.new("RGB", (W, H))
-    canvas.paste(blur, (0, 0))
-    # dark gradient
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    for y in range(H):
-        a = int(180 * (y / H) ** 1.2) + 40
-        od.line([(0, y), (W, y)], fill=(0, 0, 0, min(a, 210)))
-    canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
-    draw = ImageDraw.Draw(canvas)
-
-    # poster card on left (classic)
-    pad = int(W * 0.04)
-    if poster_bytes and layout != "minimal":
-        try:
-            pimg = Image.open(io.BytesIO(poster_bytes)).convert("RGB")
-            ph = int(H * 0.72)
-            pw = int(ph * 2 / 3)
-            pimg = pimg.resize((pw, ph), Image.Resampling.LANCZOS)
-            px, py = pad, (H - ph) // 2
-            # shadow
-            shadow = Image.new("RGBA", (pw + 20, ph + 20), (0, 0, 0, 0))
-            sd = ImageDraw.Draw(shadow)
-            sd.rounded_rectangle([0, 0, pw + 18, ph + 18], radius=16, fill=(0, 0, 0, 120))
-            canvas.paste(shadow, (px - 6, py - 4), shadow)
-            # rounded paste approx
-            mask = Image.new("L", (pw, ph), 0)
-            md = ImageDraw.Draw(mask)
-            md.rounded_rectangle([0, 0, pw, ph], radius=14, fill=255)
-            canvas.paste(pimg, (px, py), mask)
-            text_x = px + pw + pad
-        except Exception:
-            text_x = pad
+            base = Image.new("RGB", (W, H), (24, 24, 32))
     else:
-        text_x = pad
+        base = Image.new("RGB", (W, H), (24, 24, 32))
 
-    max_tw = W - text_x - pad
+    art = _cover(base, W, H)
+    if layout == "cinema":
+        art = ImageEnhance.Brightness(art).enhance(0.55)
+        art = art.filter(ImageFilter.GaussianBlur(2))
 
-    title_font = _font(max(28, W // 28), bold=True)
-    meta_font = _font(max(18, W // 55))
-    small_font = _font(max(16, W // 60))
-    brand_font = _font(max(16, W // 58), bold=True)
+    canvas = art.convert("RGBA")
+    if layout == "landscape":
+        canvas = Image.alpha_composite(canvas, _gradient_left(W, H))
+        canvas = Image.alpha_composite(canvas, _gradient_bottom(W, H))
+    elif layout == "hero":
+        canvas = Image.alpha_composite(canvas, _gradient_bottom(W, H))
+        # strong left vignette
+        canvas = Image.alpha_composite(canvas, _gradient_left(W, H))
+    else:  # cinema
+        top = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        td = ImageDraw.Draw(top)
+        for y in range(H):
+            a = int(160 * abs((y / H) - 0.5) * 2)
+            td.line([(0, y), (W, y)], fill=(0, 0, 0, min(a + 40, 200)))
+        canvas = Image.alpha_composite(canvas, top)
 
-    y = int(H * 0.18) if layout == "hero" else int(H * 0.22)
-    title = d["title"]
-    for line in _wrap(title, draw, title_font, max_tw, 2):
-        draw.text((text_x, y), line, font=title_font, fill=(255, 255, 255))
-        y += title_font.size + 8
+    draw = ImageDraw.Draw(canvas)
+    pad = 64 if layout == "landscape" else 48
 
-    meta = f"{d.get('year') or ''}  ·  ⭐ {d.get('rating') or '—'}  ·  {s.get('quality') or '1080p'}"
-    draw.text((text_x, y + 6), meta, font=meta_font, fill=(200, 210, 230))
-    y += meta_font.size + 28
+    # type badge
+    label = media_label(d)
+    f_badge = _font(15, True)
+    type_w = _textlen(draw, label, f_badge) + 32
+    by = 48 if layout != "cinema" else 40
+    _round_rect(draw, [pad, by, pad + type_w, by + 34], 8, (255, 255, 255))
+    draw.text((pad + 16, by + 8), label, font=f_badge, fill=(10, 10, 10))
 
-    chips = [
-        s.get("status") or "Completed",
-        s.get("audio") or "Hindi",
-        d.get("genres", "").split(",")[0].strip() if d.get("genres") else "",
-    ]
-    cx = text_x
-    for chip in chips:
-        if not chip:
-            continue
-        tw = draw.textlength(chip, font=small_font) + 24
-        draw.rounded_rectangle([cx, y, cx + tw, y + small_font.size + 14], radius=10, fill=(255, 255, 255, 40))
-        # solid chip
-        draw.rounded_rectangle([cx, y, cx + tw, y + small_font.size + 14], radius=10, fill=(40, 48, 70))
-        draw.text((cx + 12, y + 6), chip, font=small_font, fill=(230, 235, 255))
-        cx += tw + 10
-    y += small_font.size + 36
+    x_meta = pad + type_w + 16
+    f_meta = _font(20, True)
+    if d.get("year"):
+        draw.text((x_meta, by + 6), str(d["year"]), font=f_meta, fill=(220, 220, 220))
+        x_meta += _textlen(draw, str(d["year"]), f_meta) + 18
+    if d.get("rating"):
+        draw.text((x_meta, by + 6), f"* {d['rating']}", font=f_meta, fill=(240, 240, 240))
 
-    if s.get("show_overview") and d.get("overview") and layout != "minimal":
-        for line in _wrap(d["overview"], draw, small_font, max_tw, 4):
-            draw.text((text_x, y), line, font=small_font, fill=(180, 190, 210))
-            y += small_font.size + 6
+    # title / logo
+    y = 110 if layout == "landscape" else 100
+    logo_img = None
+    if logo_bytes:
+        try:
+            logo_img = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+        except Exception:
+            logo_img = None
 
-    # brand bar
-    ch = s.get("channel") or "DragonByte"
-    bar_h = int(H * 0.07)
-    draw.rectangle([0, H - bar_h, W, H], fill=(12, 14, 22))
-    brand = f"ꓚʏ፝֟፝֟ʀᴀ  ×  {ch}  ·  PosterFORGE"
-    bw = draw.textlength(brand, font=brand_font)
-    draw.text(((W - bw) / 2, H - bar_h + (bar_h - brand_font.size) / 2), brand, font=brand_font, fill=(160, 175, 210))
+    max_title_w = int(W * (0.55 if layout == "landscape" else 0.50))
+    if logo_img:
+        ir = logo_img.width / max(logo_img.height, 1)
+        max_h = 110 if layout != "cinema" else 100
+        dw = max_title_w
+        dh = dw / ir
+        if dh > max_h:
+            dh = max_h
+            dw = dh * ir
+        logo_r = logo_img.resize((int(dw), int(dh)), Image.Resampling.LANCZOS)
+        canvas.paste(logo_r, (pad, y), logo_r)
+        y += int(dh) + 18
+    else:
+        f_title = _font(52 if layout == "landscape" else 44, True)
+        for line in _wrap(d["title"], draw, f_title, max_title_w, 2):
+            draw.text((pad, y), line, font=f_title, fill=(255, 255, 255))
+            y += f_title.size + 6
+        y += 12
 
+    # stats line
+    f_stat = _font(18)
+    stats = []
+    if d.get("seasons"):
+        stats.append(f"{d['seasons']} Season" + ("s" if d["seasons"] != 1 else ""))
+    if d.get("episodes"):
+        stats.append(f"{d['episodes']} Episodes")
+    if s.get("status"):
+        stats.append(s["status"])
+    if s.get("audio"):
+        stats.append(s["audio"])
+    if s.get("pixels"):
+        stats.append(s["pixels"].split("|")[0].strip())
+    if stats:
+        draw.text((pad, y), "  |  ".join(stats[:5]), font=f_stat, fill=(200, 205, 220))
+        y += 28
+
+    # overview
+    if s.get("show_overview") and d.get("overview") and layout != "cinema":
+        f_ov = _font(17)
+        for line in _wrap(d["overview"], draw, f_ov, max_title_w, 3):
+            draw.text((pad, y), line, font=f_ov, fill=(180, 188, 205))
+            y += f_ov.size + 5
+
+    # CTA button
+    f_cta = _font(18, True)
+    cta_w = max(190, int(_textlen(draw, cta, f_cta) + 56))
+    btn_h = 52
+    bx, by2 = pad, H - 48 - btn_h
+    _round_rect(draw, [bx, by2, bx + cta_w, by2 + btn_h], 12, (255, 255, 255))
+    tw = _textlen(draw, cta, f_cta)
+    draw.text((bx + (cta_w - tw) / 2, by2 + 14), cta, font=f_cta, fill=(10, 10, 10))
+
+    # brand corner
+    draw_brand(draw, W, channel)
+
+    out = canvas.convert("RGB")
     buf = io.BytesIO()
-    canvas.save(buf, format="JPEG", quality=92)
+    out.save(buf, format="JPEG", quality=93)
     buf.seek(0)
     return buf.read()
 
 
 def studio_keyboard(s: dict) -> InlineKeyboardMarkup:
-    layout = s.get("layout", "classic")
-    quality = s.get("quality", "1080p")
+    layout = s.get("layout", "landscape")
+    tpl = s.get("caption_tpl", "classic")
     audio = s.get("audio", "Hindi")
     status = s.get("status", "Completed")
+    pixels = s.get("pixels", PIXEL_PRESETS[0])
     ov = s.get("show_overview", True)
 
-    def mark(cur, val):
-        return "• " + val if cur == val else val
+    def m(cur, val, label=None):
+        lab = label or val
+        return ("> " + lab) if cur == val else lab
+
+    # pixel cycle index
+    try:
+        px_i = PIXEL_PRESETS.index(pixels)
+    except ValueError:
+        px_i = 0
+    next_px = PIXEL_PRESETS[(px_i + 1) % len(PIXEL_PRESETS)]
 
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(sc(mark(layout, "classic")), callback_data="pf:set:layout:classic"),
-            InlineKeyboardButton(sc(mark(layout, "hero")), callback_data="pf:set:layout:hero"),
-            InlineKeyboardButton(sc(mark(layout, "minimal")), callback_data="pf:set:layout:minimal"),
+            InlineKeyboardButton(sc(m(layout, "landscape", "landscape")), callback_data="pf:set:layout:landscape"),
+            InlineKeyboardButton(sc(m(layout, "hero", "hero")), callback_data="pf:set:layout:hero"),
+            InlineKeyboardButton(sc(m(layout, "cinema", "cinema")), callback_data="pf:set:layout:cinema"),
         ],
         [
-            InlineKeyboardButton(sc(mark(quality, "720p")), callback_data="pf:set:quality:720p"),
-            InlineKeyboardButton(sc(mark(quality, "1080p")), callback_data="pf:set:quality:1080p"),
-            InlineKeyboardButton(sc(mark(quality, "4K")), callback_data="pf:set:quality:4K"),
+            InlineKeyboardButton(sc(m(tpl, "classic")), callback_data="pf:set:caption_tpl:classic"),
+            InlineKeyboardButton(sc(m(tpl, "compact")), callback_data="pf:set:caption_tpl:compact"),
+            InlineKeyboardButton(sc(m(tpl, "hashtag")), callback_data="pf:set:caption_tpl:hashtag"),
+            InlineKeyboardButton(sc(m(tpl, "minimal")), callback_data="pf:set:caption_tpl:minimal"),
         ],
         [
-            InlineKeyboardButton(sc(mark(audio, "Hindi")), callback_data="pf:set:audio:Hindi"),
-            InlineKeyboardButton(sc(mark(audio, "English")), callback_data="pf:set:audio:English"),
-            InlineKeyboardButton(sc(mark(audio, "Dual")), callback_data="pf:set:audio:Dual"),
+            InlineKeyboardButton(sc(m(audio, "Hindi")), callback_data="pf:set:audio:Hindi"),
+            InlineKeyboardButton(sc(m(audio, "English")), callback_data="pf:set:audio:English"),
+            InlineKeyboardButton(sc(m(audio, "Dual")), callback_data="pf:set:audio:Dual"),
         ],
         [
-            InlineKeyboardButton(sc(mark(status, "Completed")), callback_data="pf:set:status:Completed"),
-            InlineKeyboardButton(sc(mark(status, "Continuing")), callback_data="pf:set:status:Continuing"),
-            InlineKeyboardButton(sc(mark(status, "Upcoming")), callback_data="pf:set:status:Upcoming"),
+            InlineKeyboardButton(sc(m(status, "Completed")), callback_data="pf:set:status:Completed"),
+            InlineKeyboardButton(sc(m(status, "Continuing")), callback_data="pf:set:status:Continuing"),
+            InlineKeyboardButton(sc(m(status, "Upcoming")), callback_data="pf:set:status:Upcoming"),
         ],
         [
-            InlineKeyboardButton(
-                sc("overview ᴏɴ" if ov else "overview ᴏꜰꜰ"),
-                callback_data="pf:set:overview:toggle",
-            ),
-            InlineKeyboardButton(sc("ᴄʜᴀɴɴᴇʟ"), callback_data="pf:set:channel:ask"),
+            InlineKeyboardButton(sc("pixels: ") + pixels.split("|")[0].strip(), callback_data=f"pf:set:pixels:{next_px}"),
+            InlineKeyboardButton(sc("overview ") + ("on" if ov else "off"), callback_data="pf:set:overview:toggle"),
         ],
         [
-            InlineKeyboardButton(sc("🎨 ɢᴇɴᴇʀᴀᴛᴇ ᴘᴏꜱᴛᴇʀ"), callback_data="pf:gen"),
-            InlineKeyboardButton(sc("📝 ᴄᴀᴘᴛɪᴏɴ"), callback_data="pf:cap"),
+            InlineKeyboardButton(sc("channel"), callback_data="pf:set:channel:ask"),
+            InlineKeyboardButton(sc("generate poster"), callback_data="pf:gen"),
+            InlineKeyboardButton(sc("caption"), callback_data="pf:cap"),
         ],
-        [InlineKeyboardButton(sc("ᴄʟᴏꜱᴇ"), callback_data="pf:close")],
+        [InlineKeyboardButton(sc("close"), callback_data="pf:close")],
     ])
 
 
 async def open_studio(cq: CallbackQuery, media_type: str, tmdb_id: int):
-    await cq.answer(sc("ʟᴏᴀᴅɪɴɢ..."))
+    await cq.answer(sc("loading..."))
     d = await load_details(media_type, tmdb_id)
     if not d:
-        return await cq.message.edit_text(sc("ᴅᴇᴛᴀɪʟꜱ ɴᴏᴛ ꜰᴏᴜɴᴅ"))
+        return await cq.message.edit_text(sc("details not found"))
 
     uid = cq.from_user.id
-    state = {**DEFAULTS, "data": d}
+    state = {
+        **DEFAULTS,
+        "data": d,
+        "status": d.get("status") or DEFAULTS["status"],
+    }
     SESSIONS[uid] = state
 
-    poster_b = await fetch_bytes(d.get("poster"))
-    thumb = d.get("poster") or d.get("backdrop")
+    thumb = d.get("backdrop") or d.get("poster")
     cap = (
         f"<b>{d['title']}</b> ({d['year']})\n"
-        f"{'🎬' if d['type']=='movie' else '📺'} · ⭐ <code>{d['rating']}</code>\n\n"
-        f"<i>{sc('ɴᴇᴇᴄʜᴇ ꜱᴇ ᴏᴘᴛɪᴏɴꜱ ᴄʜᴀɴɢᴇ ᴋᴀʀᴏ · ᴘʜɪʀ ɢᴇɴᴇʀᴀᴛᴇ')}</i>"
+        f"{media_label(d)} · * {d['rating']}\n\n"
+        f"<i>{sc('use buttons to change layout / caption / audio')}</i>\n"
+        f"<i>{sc('then generate poster')}</i>"
     )
     kb = studio_keyboard(state)
     try:
-        if thumb:
-            await cq.message.delete()
-            await app.send_photo(
-                cq.message.chat.id,
-                photo=thumb,
-                caption=cap,
-                reply_markup=kb,
-            )
-        else:
-            await cq.message.edit_text(cap, reply_markup=kb)
+        await cq.message.delete()
     except Exception:
-        await cq.message.reply_text(cap, reply_markup=kb)
+        pass
+    if thumb:
+        await app.send_photo(cq.message.chat.id, photo=thumb, caption=cap, reply_markup=kb)
+    else:
+        await app.send_message(cq.message.chat.id, cap, reply_markup=kb)
 
 
 @app.on_callback_query(filters.regex(r"^pf:pick:(movie|tv):(\d+)$"))
 async def pf_pick(_, cq: CallbackQuery):
-    parts = cq.data.split(":")
-    await open_studio(cq, parts[2], int(parts[3]))
+    _, _, mt, tid = cq.data.split(":")
+    await open_studio(cq, mt, int(tid))
 
 
 @app.on_callback_query(filters.regex(r"^pf:set:"))
@@ -371,44 +523,39 @@ async def pf_set(_, cq: CallbackQuery):
     uid = cq.from_user.id
     state = SESSIONS.get(uid)
     if not state:
-        return await cq.answer(sc("ꜱᴇꜱꜱɪᴏɴ ᴇxᴘɪʀᴇᴅ · /tmdb ꜱᴇ ᴘʜɪʀ ꜱᴇʟᴇᴄᴛ ᴋᴀʀᴏ"), show_alert=True)
+        return await cq.answer(sc("session expired — /tmdb again"), show_alert=True)
 
-    # pf:set:key:value
-    _, _, key, val = cq.data.split(":", 3)
+    parts = cq.data.split(":", 3)
+    key, val = parts[2], parts[3]
     if key == "overview":
         state["show_overview"] = not state.get("show_overview", True)
     elif key == "channel":
         await cq.answer()
-        await cq.message.reply_text(
-            f"{sc('ɴᴀʏᴀ ᴄʜᴀɴɴᴇʟ ɴᴀᴍᴇ ʙʜᴇᴊᴏ')}\n"
-            f"<code>/setchannel DragonByte</code>"
+        return await cq.message.reply_text(
+            f"{sc('send new channel name')}\n<code>/setchannel DragonByte</code>"
         )
-        return
     else:
         state[key] = val
-        if key == "quality":
-            state["pixels"] = val
 
     SESSIONS[uid] = state
     try:
         await cq.message.edit_reply_markup(reply_markup=studio_keyboard(state))
     except Exception:
         pass
-    await cq.answer(sc("ᴜᴘᴅᴀᴛᴇᴅ"))
+    await cq.answer(sc("updated"))
 
 
 @app.on_message(filters.command("setchannel"))
 async def set_channel(_, m: Message):
     if len(m.command) < 2:
-        return await m.reply_text(f"<code>/setchannel DragonByte</code>")
+        return await m.reply_text("<code>/setchannel DragonByte</code>")
     name = " ".join(m.command[1:]).strip()[:32]
-    uid = m.from_user.id
-    state = SESSIONS.get(uid)
+    state = SESSIONS.get(m.from_user.id)
     if not state:
-        return await m.reply_text(sc("ᴘᴇʜʟᴇ /tmdb ꜱᴇ ᴛɪᴛʟᴇ ꜱᴇʟᴇᴄᴛ ᴋᴀʀᴏ"))
+        return await m.reply_text(sc("select a title with /tmdb first"))
     state["channel"] = name
-    SESSIONS[uid] = state
-    await m.reply_text(f"✅ {sc('ᴄʜᴀɴɴᴇʟ')} → <b>{name}</b>\n{sc('ᴀʙ ɢᴇɴᴇʀᴀᴛᴇ ᴅᴜʙᴀʀᴀ ᴅᴀʙᴀᴏ')}")
+    SESSIONS[m.from_user.id] = state
+    await m.reply_text(f"{sc('channel set')} → <b>{name}</b>")
 
 
 @app.on_callback_query(filters.regex(r"^pf:gen$"))
@@ -416,41 +563,38 @@ async def pf_gen(_, cq: CallbackQuery):
     uid = cq.from_user.id
     state = SESSIONS.get(uid)
     if not state or "data" not in state:
-        return await cq.answer(sc("ꜱᴇꜱꜱɪᴏɴ ᴇxᴘɪʀᴇᴅ"), show_alert=True)
+        return await cq.answer(sc("session expired"), show_alert=True)
 
-    await cq.answer(sc("ʀᴇɴᴅᴇʀɪɴɢ..."))
+    await cq.answer(sc("rendering..."))
     d = state["data"]
-    wait = await cq.message.reply_text(f"🎨 {sc('ᴘᴏꜱᴛᴇʀ ʙᴀɴ ᴠᴀʜᴀ ʜᴀɪ')}...")
+    wait = await cq.message.reply_text(sc("rendering poster..."))
 
-    poster_b = await fetch_bytes(d.get("poster"))
-    back_b = await fetch_bytes(d.get("backdrop"))
+    art = await fetch_bytes(d.get("backdrop") or d.get("poster"))
+    logo = await fetch_bytes(d.get("logo"))
     try:
-        jpg = render_poster(d, state, poster_b, back_b)
+        jpg = render_poster(d, state, art, logo)
         caption = build_caption(d, state)
-        await cq.message.reply_photo(
-            photo=io.BytesIO(jpg),
-            caption=caption[:1024],
-        )
+        bio = io.BytesIO(jpg)
+        bio.name = "poster.jpg"
+        await cq.message.reply_photo(photo=bio, caption=caption[:1024])
         await wait.delete()
     except Exception as e:
-        await wait.edit_text(f"❌ <code>{str(e)[:200]}</code>")
+        await wait.edit_text(f"<code>{str(e)[:220]}</code>")
 
 
 @app.on_callback_query(filters.regex(r"^pf:cap$"))
 async def pf_cap(_, cq: CallbackQuery):
-    uid = cq.from_user.id
-    state = SESSIONS.get(uid)
+    state = SESSIONS.get(cq.from_user.id)
     if not state or "data" not in state:
-        return await cq.answer(sc("ꜱᴇꜱꜱɪᴏɴ ᴇxᴘɪʀᴇᴅ"), show_alert=True)
-    cap = build_caption(state["data"], state)
+        return await cq.answer(sc("session expired"), show_alert=True)
     await cq.answer()
-    await cq.message.reply_text(f"<b>{sc('ᴄᴀᴘᴛɪᴏɴ')}</b>\n\n<code>{cap}</code>")
+    await cq.message.reply_text(f"<b>{sc('caption')}</b>\n\n<code>{build_caption(state['data'], state)}</code>")
 
 
 @app.on_callback_query(filters.regex(r"^pf:close$"))
 async def pf_close(_, cq: CallbackQuery):
     SESSIONS.pop(cq.from_user.id, None)
-    await cq.answer(sc("ᴄʟᴏꜱᴇᴅ"))
+    await cq.answer(sc("closed"))
     try:
         await cq.message.delete()
     except Exception:
@@ -460,11 +604,13 @@ async def pf_close(_, cq: CallbackQuery):
 @app.on_message(filters.command(["poster", "posterforge"]))
 async def poster_help(_, m: Message):
     await m.reply_text(
-        f"<b>{sc('ᴘᴏꜱᴛᴇʀꜰᴏʀɢᴇ')}</b>\n\n"
+        f"<b>{sc('posterforge')}</b>\n\n"
         f"1. <code>/tmdb inception</code>\n"
-        f"2. {sc('ʀᴇꜱᴜʟᴛ ꜱᴇʟᴇᴄᴛ ᴋᴀʀᴏ')}\n"
-        f"3. {sc('ʟᴀʏᴏᴜᴛ / ǫᴜᴀʟɪᴛʏ / ᴀᴜᴅɪᴏ ᴄʜᴀɴɢᴇ ᴋᴀʀᴏ')}\n"
-        f"4. <b>{sc('ɢᴇɴᴇʀᴀᴛᴇ ᴘᴏꜱᴛᴇʀ')}</b>\n\n"
-        f"<code>/setchannel YourName</code> — {sc('ᴘᴏᴡᴇʀᴇᴅ ʙʏ ɴᴀᴍᴇ')}\n\n"
-        f"<i>{sc('ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴅʀᴀɢᴏɴʙʏᴛᴇ ɴᴇᴛᴡᴏʀᴋ')}</i>"
+        f"2. {sc('select a result')}\n"
+        f"3. {sc('layout')}: landscape / hero / cinema\n"
+        f"4. {sc('caption')}: classic / compact / hashtag / minimal\n"
+        f"5. {sc('audio · status · pixels')}\n"
+        f"6. <b>{sc('generate poster')}</b>\n\n"
+        f"<code>/setchannel YourName</code>\n\n"
+        f"<i>{sc('powered by dragonbyte network')}</i>"
     )

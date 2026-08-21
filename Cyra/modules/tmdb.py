@@ -42,7 +42,7 @@ async def tmdb_search(_, m: Message):
         )
 
     q = " ".join(m.command[1:]).strip()
-    st = await m.reply_text(f"🔍 {sc('ꜱᴇᴀʀᴄʜɪɴɢ')} <code>{q}</code>...")
+    st = await m.reply_text(f"{sc('ꜱᴇᴀʀᴄʜɪɴɢ')} <code>{q}</code>...")
 
     data = await tmdb_get("/search/multi", {"query": q, "include_adult": "false"})
     if not data or not data.get("results"):
@@ -60,7 +60,7 @@ async def tmdb_search(_, m: Message):
     for i, r in enumerate(results, 1):
         title = r.get("title") or r.get("name") or "?"
         year = (r.get("release_date") or r.get("first_air_date") or "")[:4]
-        mtype = "🎬" if r["media_type"] == "movie" else "📺"
+        mtype = "[M]" if r["media_type"] == "movie" else "[S]"
         rating = r.get("vote_average") or 0
         lines.append(f"{i}. {mtype} <b>{title}</b> ({year}) · ⭐{rating:.1f}")
         buttons.append([
