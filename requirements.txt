@@ -1,0 +1,9 @@
+pyrofork
+tgcrypto
+python-dotenv
+motor
+pymongo
+dnspython
+aiohttp
+requests
+pinscrape

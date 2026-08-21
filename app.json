@@ -1,0 +1,20 @@
+{
+  "name": "CyraCoreBot",
+  "description": "Cute AI helper bot by DragonByte Network | @flexyy",
+  "repository": "https://github.com/",
+  "keywords": ["telegram", "bot", "pyrogram", "pinterest"],
+  "env": {
+    "API_ID": {"description": "from my.telegram.org", "required": true},
+    "API_HASH": {"description": "from my.telegram.org", "required": true},
+    "BOT_TOKEN": {"description": "from @BotFather", "required": true},
+    "OWNER_ID": {"description": "Owner Telegram ID", "value": "8681820826", "required": true},
+    "MONGO_URL": {"description": "MongoDB URL", "required": true},
+    "TMDB_API_KEY": {"description": "TMDB API key (optional)", "required": false},
+    "AUTH_CHANNEL": {"description": "Force-sub channel id", "required": false},
+    "FSUB": {"description": "True/False", "value": "False", "required": false},
+    "LOGGER_GROUP_ID": {"description": "Log group id", "value": "-1003913785429", "required": false},
+    "SUPPORT_GROUP": {"value": "DragonByte_Network", "required": false},
+    "UPDATES_CHANNEL": {"value": "DragonByte_Network", "required": false}
+  },
+  "buildpacks": [{"url": "heroku/python"}]
+}
